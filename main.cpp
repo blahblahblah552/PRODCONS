@@ -1,22 +1,14 @@
-#include <cstdlib>
 #include <iostream>
-#include <ctime>
-#include <vector>
-#include <iomanip>
-#include <fcntl.h>
-#include <sys/mman.h>
-#include <sys/types.h>
+#include <cstdlib>
 #include <unistd.h>
-#include <stdio.h>
-#include <string.h>
-#include <sys/ipc.h>
 #include <sys/shm.h>
-#include <chrono>
-#include <thread>
 #include <semaphore.h>
-#include <fstream>
-#include <sys/wait.h>
 #include <queue>
+#include <asm-generic/fcntl.h>
+#include <iomanip>
+#include <bits/this_thread_sleep.h>
+#include <sys/wait.h>
+#include <fstream>
 
 const int SEED = 5;
 const float LO = 0.5;
@@ -40,7 +32,6 @@ std::ostream& operator<<(std::ostream& os, const Date& d) {
     os << d.day << "/" << d.month << "/" << d.year;
     return os;
 };
-
 
 struct SalesData
 {
@@ -95,8 +86,8 @@ int main(int argc, char const *argv[])
     {
         producers = atoi(argv[0]);
         consumers = atoi(argv[1]);
+        salesDataBufferSize = sizeof(statistics) + sizeof(SalesData) * atoi(argv[1]);
     }
-    salesDataBufferSize = sizeof(statistics) + sizeof(SalesData) * atoi(argv[1]);
 
     sem_t *semaphore;
     semaphore = sem_open("pSem", O_CREAT, 0644, 1);
@@ -127,27 +118,34 @@ int main(int argc, char const *argv[])
     // shmget returns an identifier in shmid
      int shmid = shmget(key, salesDataBufferSize, 0666 | IPC_CREAT);
      
-     if (shmid == -1)
-     {
+    if (shmid == -1) {
         perror("shmget");
-        exit(1);
-     }
+        sem_close(semaphore);
+        sem_unlink("pSem");
+        exit(EXIT_FAILURE);
+    }
 
     // shmat to attach to shared memory
     statistics *sharedSalesData = (statistics*)shmat(shmid, (void*)0, 0);
 
-    if ((void*) sharedSalesData == (void *) -1)
-    {
+    if (sharedSalesData == (void*)-1) {
         perror("shmat");
-        exit(1);
+        shmctl(shmid, IPC_RMID, NULL);
+        sem_close(semaphore);
+        sem_unlink("pSem");
+        exit(EXIT_FAILURE);
     }
 
-    sharedSalesData->salesDataVec.reserve()
+    sharedSalesData->salesDataVec.reserve(10);
 
     pid_t pid0 = fork();
 
     if (pid0 == -1) { 
         perror("fork"); 
+        shmdt(sharedSalesData);
+        shmctl(shmid, IPC_RMID, NULL);
+        sem_close(semaphore);
+        sem_unlink("pSem");
         exit(EXIT_FAILURE); 
     }
 
@@ -163,7 +161,7 @@ int main(int argc, char const *argv[])
             std::cout << "printed from parent process " << getpid() << "\n";
             if(sem_trywait(semaphore)){
                 //std::this_thread::sleep_for(std::chrono::seconds(1));
-                sharedSalesData->salesDataVec.emplace(SalesData());
+                sharedSalesData->salesDataVec.emplace_back(SalesData());
                 sharedSalesData->NumProduceds++;
                 // Release mutex sem: V (mutex_sem)
                 if (sem_post (semaphore) == -1) {
@@ -184,16 +182,15 @@ int main(int argc, char const *argv[])
         {
             std::cout << "printed from child process " << getpid() << "\n"; 
             std::this_thread::sleep_for(std::chrono::seconds(1));
-            if(sem_trywait(semaphore) && !sharedSalesData->salesDataQueue.empty()){
-                std::cout << sharedSalesData->salesDataQueue.front() << "\n";
+            sem_wait(semaphore);
+            if (!sharedSalesData->salesDataVec.empty()) {
+                std::cout << sharedSalesData->salesDataVec.front() << "\n";
                 sharedSalesData->numConsumers++;
-                sharedSalesData->salesDataQueue.pop();
+               sharedSalesData->salesDataVec.erase(sharedSalesData->salesDataVec.begin());
                 //sharedSalesData->salesDataQueue.pop_back();
                 //memcpy(sharedSalesData, &stat, sizeof(stat));
                 // Release mutex sem: V (mutex_sem)
-                if (sem_post (semaphore) == -1) {
-                    perror ("sem_post: mutex_sem"); exit (1);
-                }
+                sem_post(semaphore);
             } else
             {
                  std::cout << "lock1 failed\n";
@@ -203,12 +200,12 @@ int main(int argc, char const *argv[])
         }
     }
 
-    sem_unlink("pSem");
-    shmdt(semaphore);
-    // detach from shared memory
-    shmdt(sharedSalesData);
+    
     wait(NULL);
-    shmctl(shmid,IPC_RMID,NULL);
+    shmdt(sharedSalesData);
+    shmctl(shmid, IPC_RMID, NULL);
+    sem_close(semaphore);
+    sem_unlink("pSem");
     
     return 0;
 }
