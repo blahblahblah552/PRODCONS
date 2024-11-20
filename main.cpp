@@ -9,6 +9,7 @@
 #include <bits/this_thread_sleep.h>
 #include <sys/wait.h>
 #include <fstream>
+#include <string.h>
 
 const int SEED = 5;
 const float LO = 0.5;
@@ -16,11 +17,12 @@ const float HI = 999.99;
 
 struct Date
 {
-    const int year = 2016;
+    int year = 2016;
     int day = std::rand()%29 + 1; // 1-30
     int month = std::rand()%11 + 1; // 1 -12
 
     Date& operator=(const Date& r){
+        year = r.year;
         day = r.day;
         month = r.month;
         return *this;
@@ -68,9 +70,9 @@ struct statistics
     float monthWideTotalSales = 0;
     float aggregateSales = 0; //all sales together
     time_t totalTime;
-    int NumProduceds = 0;
+    int numProduceds = 0;
     int numConsumers = 0;
-    std::vector<SalesData> salesDataVec;
+    std::array<SalesData, 10> salesDataVec;
 };
 
 // input producers, consumers, and buffer size
@@ -90,12 +92,10 @@ int main(int argc, char const *argv[])
     }
 
     sem_t *semaphore;
-    semaphore = sem_open("pSem", O_CREAT, 0644, 1);
-
-    if(semaphore == SEM_FAILED){
-        sem_close(semaphore);
-        perror("Failed to open semphore for full");
-        exit(-1);
+    // Create and initialize the semaphore
+    if ((semaphore = sem_open("pSem", O_CREAT, 0666, 2)) == SEM_FAILED) {
+        perror("sem_open");
+        exit(EXIT_FAILURE);
     }
 
     const char *sharedSalesDataLocation = "pcp.conf";
@@ -136,7 +136,12 @@ int main(int argc, char const *argv[])
         exit(EXIT_FAILURE);
     }
 
-    sharedSalesData->salesDataVec.reserve(10);
+    sharedSalesData->numProduceds = 0;
+    sharedSalesData->numConsumers =0;
+
+/*     statistics stat;
+    stat.salesDataVec.reserve(10);
+    memcpy(sharedSalesData, &stat, sizeof(stat)); */
 
     pid_t pid0 = fork();
 
@@ -149,54 +154,39 @@ int main(int argc, char const *argv[])
         exit(EXIT_FAILURE); 
     }
 
-    if (pid0 > 0) {  
+    if (pid0 > 0) {
+    sem_post(semaphore);
        
         std::cout << "Date\t\tStore ID\tRegester #\tSales Amount\t\n";
         std::cout << "printed from parent process " << getpid() << "\n";
       
-        std::cout << "printed from parent process # of produced " << sharedSalesData->NumProduceds << "\n";
+        std::cout << "printed from parent process # of produced " << sharedSalesData->numProduceds << "\n";
        
-        while (sharedSalesData->NumProduceds < 10)
+        while (sharedSalesData->numProduceds < 10)
         {
-            std::cout << "printed from parent process " << getpid() << "\n";
-            if(sem_trywait(semaphore)){
-                //std::this_thread::sleep_for(std::chrono::seconds(1));
-                sharedSalesData->salesDataVec.emplace_back(SalesData());
-                sharedSalesData->NumProduceds++;
-                // Release mutex sem: V (mutex_sem)
-                if (sem_post (semaphore) == -1) {
-                    perror ("sem_post: mutex_sem"); exit (1);
-                }
-            } else
-            {
-                std::cout << "lock0 failed\n";
-                std::this_thread::sleep_for(std::chrono::seconds(1));
-            }
-            
-           
+            sem_wait(semaphore);
+            auto temp = SalesData();
+            temp.storeID = getpid()%6;
+            sharedSalesData->salesDataVec[sharedSalesData->numProduceds]=temp;
+            sharedSalesData->numProduceds++;
+            sem_post(semaphore);
+            std::this_thread::sleep_for(std::chrono::seconds(1));
         }
     } 
     else { 
         std::cout << "printed from child process # of consumers " << sharedSalesData->numConsumers << "\n";
+        std::cout << "printed from child process " << getpid() << "\n"; 
         while (sharedSalesData->numConsumers < 10)
         {
-            std::cout << "printed from child process " << getpid() << "\n"; 
-            std::this_thread::sleep_for(std::chrono::seconds(1));
             sem_wait(semaphore);
-            if (!sharedSalesData->salesDataVec.empty()) {
-                std::cout << sharedSalesData->salesDataVec.front() << "\n";
-                sharedSalesData->numConsumers++;
-               sharedSalesData->salesDataVec.erase(sharedSalesData->salesDataVec.begin());
-                //sharedSalesData->salesDataQueue.pop_back();
-                //memcpy(sharedSalesData, &stat, sizeof(stat));
-                // Release mutex sem: V (mutex_sem)
-                sem_post(semaphore);
-            } else
+            if (sharedSalesData->numConsumers <= sharedSalesData->numProduceds)
             {
-                 std::cout << "lock1 failed\n";
-                 std::this_thread::sleep_for(std::chrono::seconds(2));
-            }
-            
+               std::cout << sharedSalesData->salesDataVec[sharedSalesData->numConsumers] << "\n";
+                
+                sharedSalesData->numConsumers++;
+            } 
+            sem_post(semaphore);
+            //std::this_thread::sleep_for(std::chrono::seconds(1));
         }
     }
 
