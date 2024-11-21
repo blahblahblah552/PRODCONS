@@ -6,7 +6,7 @@
 #include <queue>
 #include <asm-generic/fcntl.h>
 #include <iomanip>
-#include <bits/this_thread_sleep.h>
+#include <thread>
 #include <sys/wait.h>
 #include <fstream>
 #include <string.h>
@@ -71,29 +71,34 @@ struct statistics
     float aggregateSales = 0; //all sales together
     time_t totalTime;
     int numProduceds = 0;
-    int numConsumers = 0;
-    std::array<SalesData, 10> salesDataVec;
+    int rear = 0;
+    int totalProduced = 0;
+    SalesData salesDataVec[10];
 };
 
 // input producers, consumers, and buffer size
 int main(int argc, char const *argv[])
 {
+    struct timespec ts;
+    time_t startTime, endTime;
+
     std::srand(SEED);
+    statistics stat;
 
     long unsigned int producers = 1;
     long unsigned int consumers = 1;
-    long unsigned int salesDataBufferSize = sizeof(statistics)+sizeof(SalesData)*10;
+    long unsigned int salesDataBufferSize = sizeof(stat);
 
     if (argc > 3)
     {
         producers = atoi(argv[0]);
         consumers = atoi(argv[1]);
-        salesDataBufferSize = sizeof(statistics) + sizeof(SalesData) * atoi(argv[1]);
+        salesDataBufferSize = sizeof(statistics) + sizeof(SalesData) * atoi(argv[2]);
     }
 
     sem_t *semaphore;
     // Create and initialize the semaphore
-    if ((semaphore = sem_open("pSem", O_CREAT, 0666, 2)) == SEM_FAILED) {
+    if ((semaphore = sem_open("pSem", O_CREAT, 0666, 1)) == SEM_FAILED) {
         perror("sem_open");
         exit(EXIT_FAILURE);
     }
@@ -101,7 +106,6 @@ int main(int argc, char const *argv[])
     const char *sharedSalesDataLocation = "pcp.conf";
     const int projectID = 65;   
 
-    time_t startTime, endTime;
 
     std::ofstream outfile(sharedSalesDataLocation);
     outfile.close();
@@ -136,13 +140,15 @@ int main(int argc, char const *argv[])
         exit(EXIT_FAILURE);
     }
 
-    sharedSalesData->numProduceds = 0;
-    sharedSalesData->numConsumers =0;
+    //memcpy(sharedSalesData, &stat, sizeof(stat));
+    sharedSalesData->numProduceds = -1;
+    sharedSalesData->rear = 0;
+    sharedSalesData->totalProduced = 0;
+    if (clock_gettime(CLOCK_REALTIME, &ts) == -1)
+               printf("clock_gettime");
 
-/*     statistics stat;
-    stat.salesDataVec.reserve(10);
-    memcpy(sharedSalesData, &stat, sizeof(stat)); */
-
+    ts.tv_sec = 3;
+    sem_post(semaphore);
     pid_t pid0 = fork();
 
     if (pid0 == -1) { 
@@ -155,38 +161,52 @@ int main(int argc, char const *argv[])
     }
 
     if (pid0 > 0) {
-    sem_post(semaphore);
        
-        std::cout << "Date\t\tStore ID\tRegester #\tSales Amount\t\n";
         std::cout << "printed from parent process " << getpid() << "\n";
-      
+        std::cout << "Date\t\tStore ID\tRegester #\tSales Amount\t\n";
         std::cout << "printed from parent process # of produced " << sharedSalesData->numProduceds << "\n";
-       
-        while (sharedSalesData->numProduceds < 10)
+        std::cout << "total parent " << sharedSalesData->totalProduced << "\n";
+        std::cout << "rear parent " << sharedSalesData->rear << "\n";
+        SalesData salesTemp;
+        while (sharedSalesData->totalProduced <= 10 && sharedSalesData->rear >= -50)
         {
-            sem_wait(semaphore);
-            auto temp = SalesData();
-            temp.storeID = getpid()%6;
-            sharedSalesData->salesDataVec[sharedSalesData->numProduceds]=temp;
-            sharedSalesData->numProduceds++;
-            sem_post(semaphore);
-            std::this_thread::sleep_for(std::chrono::seconds(1));
+            salesTemp = SalesData();
+            salesTemp.storeID = getpid()%6;
+            if(sem_timedwait(semaphore,&ts) ==-1){
+                printf("parent timed out\n");
+            }else {
+                if (sharedSalesData->totalProduced <= 10)
+                {
+                    sharedSalesData->numProduceds++;
+                    sharedSalesData->salesDataVec[sharedSalesData->numProduceds] = salesTemp;
+                    sharedSalesData->totalProduced = sharedSalesData->totalProduced + 1;
+                }
+                sem_post(semaphore);
+            }
+            
+            std::this_thread::sleep_for(std::chrono::milliseconds(rand()%35+5));
+            sharedSalesData->rear--;
         }
     } 
     else { 
-        std::cout << "printed from child process # of consumers " << sharedSalesData->numConsumers << "\n";
-        std::cout << "printed from child process " << getpid() << "\n"; 
-        while (sharedSalesData->numConsumers < 10)
+        std::cout << "printed from child process # of consumers " << sharedSalesData->rear << "\n";
+        std::cout << "printed from child process " << getpid() << "\n";
+        std::cout << "total child " << sharedSalesData->totalProduced << "\n";
+        std::cout << "rear " << sharedSalesData->rear << "\n";
+        while (sharedSalesData->totalProduced <= 10 && sharedSalesData->rear >= -50)
         {
-            sem_wait(semaphore);
-            if (sharedSalesData->numConsumers <= sharedSalesData->numProduceds)
-            {
-               std::cout << sharedSalesData->salesDataVec[sharedSalesData->numConsumers] << "\n";
-                
-                sharedSalesData->numConsumers++;
-            } 
+            if(sem_timedwait(semaphore,&ts) ==-1){
+                printf("child timed out\n");
+            }else {
+                if(sharedSalesData->numProduceds >= 0)
+                {
+                    std::cout << sharedSalesData->salesDataVec[sharedSalesData->numProduceds] << "\n";
+                    sharedSalesData->numProduceds--;
+                }
             sem_post(semaphore);
+            }
             //std::this_thread::sleep_for(std::chrono::seconds(1));
+            //sharedSalesData->rear--;
         }
     }
 
@@ -195,7 +215,6 @@ int main(int argc, char const *argv[])
     shmdt(sharedSalesData);
     shmctl(shmid, IPC_RMID, NULL);
     sem_close(semaphore);
-    sem_unlink("pSem");
     
     return 0;
 }
