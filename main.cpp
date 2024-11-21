@@ -168,24 +168,21 @@ int main(int argc, char const *argv[])
         std::cout << "total parent " << sharedSalesData->totalProduced << "\n";
         std::cout << "rear parent " << sharedSalesData->rear << "\n";
         SalesData salesTemp;
-        while (sharedSalesData->totalProduced <= 10 && sharedSalesData->rear >= -50)
+        while (sharedSalesData->totalProduced <= 1000 && sharedSalesData->rear >= -50)
         {
             salesTemp = SalesData();
             salesTemp.storeID = getpid()%6;
-            if(sem_timedwait(semaphore,&ts) ==-1){
-                printf("parent timed out\n");
-            }else {
-                if (sharedSalesData->totalProduced <= 10)
-                {
-                    sharedSalesData->numProduceds++;
-                    sharedSalesData->salesDataVec[sharedSalesData->numProduceds] = salesTemp;
-                    sharedSalesData->totalProduced = sharedSalesData->totalProduced + 1;
-                }
-                sem_post(semaphore);
+            sem_wait(semaphore);
+            if (sharedSalesData->numProduceds < 10)
+            {
+                sharedSalesData->numProduceds++;
+                sharedSalesData->salesDataVec[sharedSalesData->numProduceds] = salesTemp;
+                sharedSalesData->totalProduced++;
             }
+            sem_post(semaphore);
             
             std::this_thread::sleep_for(std::chrono::milliseconds(rand()%35+5));
-            sharedSalesData->rear--;
+            //sharedSalesData->rear--;
         }
     } 
     else { 
@@ -193,18 +190,16 @@ int main(int argc, char const *argv[])
         std::cout << "printed from child process " << getpid() << "\n";
         std::cout << "total child " << sharedSalesData->totalProduced << "\n";
         std::cout << "rear " << sharedSalesData->rear << "\n";
-        while (sharedSalesData->totalProduced <= 10 && sharedSalesData->rear >= -50)
+        while (sharedSalesData->totalProduced <= 1000 && sharedSalesData->rear >= -50)
         {
-            if(sem_timedwait(semaphore,&ts) ==-1){
-                printf("child timed out\n");
-            }else {
-                if(sharedSalesData->numProduceds >= 0)
-                {
-                    std::cout << sharedSalesData->salesDataVec[sharedSalesData->numProduceds] << "\n";
-                    sharedSalesData->numProduceds--;
-                }
-            sem_post(semaphore);
+            sem_wait(semaphore);
+            if(sharedSalesData->numProduceds >= 0)
+            {
+                std::cout << sharedSalesData->salesDataVec[sharedSalesData->numProduceds] << "\n";
+                sharedSalesData->numProduceds--;
             }
+            sem_post(semaphore);
+            
             //std::this_thread::sleep_for(std::chrono::seconds(1));
             //sharedSalesData->rear--;
         }
