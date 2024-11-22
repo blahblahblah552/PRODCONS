@@ -45,7 +45,7 @@ struct SalesData
     int storeID = -1; 
 
     //register# int
-    int regesterNum = std::rand()%5 + 1;
+    int regesterNum = std::rand()%6 + 1;
 
     //sales amount float .. really should be an int when dealing with money
     float salesAmount = LO + static_cast <float> (rand()) /( static_cast <float> (RAND_MAX/(HI-LO)));
@@ -161,7 +161,6 @@ int main(int argc, char const *argv[])
     }
 
     if (pid0 > 0) {
-       
         std::cout << "printed from parent process " << getpid() << "\n";
         std::cout << "Date\t\tStore ID\tRegester #\tSales Amount\t\n";
         std::cout << "printed from parent process # of produced " << sharedSalesData->numProduceds << "\n";
@@ -186,6 +185,7 @@ int main(int argc, char const *argv[])
         }
     } 
     else { 
+        fork();
         std::cout << "printed from child process # of consumers " << sharedSalesData->rear << "\n";
         std::cout << "printed from child process " << getpid() << "\n";
         std::cout << "total child " << sharedSalesData->totalProduced << "\n";
@@ -196,6 +196,7 @@ int main(int argc, char const *argv[])
             if(sharedSalesData->numProduceds >= 0)
             {
                 std::cout << sharedSalesData->salesDataVec[sharedSalesData->numProduceds] << "\n";
+
                 sharedSalesData->numProduceds--;
             }
             sem_post(semaphore);
