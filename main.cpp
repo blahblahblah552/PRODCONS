@@ -72,13 +72,14 @@ struct statistics
     float aggregateSales = 0; //all sales together
     time_t totalTime;
     int buffer = 0;
-    int rear = 0;
     int totalProduced = 0;
-    SalesData salesDataVec[10];
+    SalesData *salesDataArr;
     sem_t *semaphore;
 };
 
-void consumersClass(statistics *sharedSalesData);
+void consumersFun(statistics *sharedSalesData);
+
+void ProducersFun(statistics *sharedSalesData);
 
 // input producers, consumers, and buffer size
 int main(int argc, char const *argv[])
@@ -86,11 +87,10 @@ int main(int argc, char const *argv[])
     time_t startTime, endTime;
 
     std::srand(SEED);
-    statistics *stat = new statistics;
 
     long unsigned int producers = 1;
     long unsigned int consumers = 1;
-    long unsigned int salesDataBufferSize = sizeof(stat);
+    long unsigned int salesDataBufferSize = sizeof(statistics)*10;
 
     if (argc > 3)
     {
@@ -98,10 +98,6 @@ int main(int argc, char const *argv[])
         consumers = atoi(argv[1]);
         salesDataBufferSize = sizeof(statistics) + sizeof(SalesData) * atoi(argv[2])+ sizeof(float)*producers;
     }
-
-    //array for store wide total sales 
-    float *arrSWTS = new float[producers];
-    stat->storeWideTotalSales = arrSWTS;
 
     const char *sharedSalesDataLocation = "pcp.conf";
     const int projectID = 65;   
@@ -142,19 +138,26 @@ int main(int argc, char const *argv[])
         exit(1);
     }
 
-    sem_unlink("pSem");// just in case of a crash can be cleared
-    // Create and initialize the semaphore
-    sem_t *sTemp;
-    if ((sTemp = sem_open("pSem", O_CREAT, 0666, 1)) == SEM_FAILED) {
-        perror("sem_open");
-        exit(EXIT_FAILURE);
+    sharedSalesData->salesDataArr = (SalesData *)mmap(NULL, sizeof(SalesData) * producers, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+    if (sharedSalesData->salesDataArr == MAP_FAILED) {
+        perror("mmap");
+        exit(1);
     }
 
-    sharedSalesData->semaphore = sTemp;
+    sem_unlink("pSem");// just in case of a crash can be cleared
 
+    sharedSalesData->semaphore = (sem_t*)mmap(NULL,sizeof(sem_t),PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+    if (sharedSalesData->semaphore == MAP_FAILED) {
+        perror("mmap");
+        exit(1);
+    }
+        // Create and initialize the semaphore
+        if ((sharedSalesData->semaphore = sem_open("pSem", O_CREAT | O_RDWR | O_EXCL, 0666, 1)) == SEM_FAILED) {
+            perror("sem_open");
+            exit(EXIT_FAILURE);
+        }
 
     sharedSalesData->buffer = -1;
-    sharedSalesData->rear = 0;
     sharedSalesData->totalProduced = 0;
     sem_post(sharedSalesData->semaphore);
     
@@ -173,31 +176,32 @@ int main(int argc, char const *argv[])
         std::cout << "printed from parent process " << getpid() << "\n";
         std::cout << "printed from parent process # of produced " << sharedSalesData->buffer << "\n";
         std::cout << "total parent " << sharedSalesData->totalProduced << "\n";
-        std::cout << "rear parent " << sharedSalesData->rear << "\n";
-        SalesData salesTemp;
-        while (sharedSalesData->totalProduced <= 100 && sharedSalesData->rear >= -50)
+        std::vector<std::thread> producerThreads;
+        for (int i = 0; i < producers; i++)
         {
-            salesTemp = SalesData();
-            salesTemp.storeID = getpid()%6;
-            sem_wait(sharedSalesData->semaphore);
-            if (sharedSalesData->buffer < 10)
-            {
-                sharedSalesData->buffer++;
-                sharedSalesData->salesDataVec[sharedSalesData->buffer] = salesTemp;
-                sharedSalesData->totalProduced++;
-            }
-            sem_post(sharedSalesData->semaphore);
-            
-            std::this_thread::sleep_for(std::chrono::milliseconds(rand()%35+5));
-            //sharedSalesData->rear--;
+            producerThreads.emplace_back(ProducersFun,sharedSalesData);
+        }
+        
+        for (auto& t : producerThreads)
+        {
+            t.join();
         }
     } 
-    else { 
-        std::cout << "printed from child process # of consumers " << sharedSalesData->rear << "\n";
+    else {
         std::cout << "printed from child process " << getpid() << "\n";
         std::cout << "total child " << sharedSalesData->totalProduced << "\n";
-        std::cout << "rear " << sharedSalesData->rear << "\n";
-        std::thread t1(consumersClass,sharedSalesData);
+        std::vector<std::thread> consumerThreads;
+        for (int i = 0; i < consumers; i++)
+        {
+            consumerThreads.emplace_back(consumersFun,sharedSalesData);
+        }
+        
+        for (auto& t : consumerThreads)
+        {
+            t.join();
+        }
+        
+        exit(0);//child exits
     }
 
     
@@ -214,25 +218,45 @@ int main(int argc, char const *argv[])
     std::cout << "Aggregate sales " << sharedSalesData->aggregateSales << "\n";
 
 
-    shmdt(sharedSalesData);
-    shmctl(shmid, IPC_RMID, NULL);
     sem_close(sharedSalesData->semaphore);
     sem_unlink("pSem");
+    shmdt(sharedSalesData);
+    shmctl(shmid, IPC_RMID, NULL);
     
     return 0;
 }
 
-void consumersClass(statistics *sharedSalesData)
+    void ProducersFun(statistics *sharedSalesData)
+{
+    SalesData salesTemp;
+    while (sharedSalesData->totalProduced <= 100)
+    {
+        salesTemp = SalesData();
+        salesTemp.storeID = getpid() % 6;
+        sem_wait(sharedSalesData->semaphore);
+        if (sharedSalesData->buffer < 10)
+        {
+            sharedSalesData->buffer++;
+            sharedSalesData->salesDataArr[sharedSalesData->buffer] = salesTemp;
+            sharedSalesData->totalProduced++;
+        }
+        sem_post(sharedSalesData->semaphore);
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(rand() % 35 + 5));
+    }
+}
+
+void consumersFun(statistics *sharedSalesData)
 {
     SalesData conSalesTemp;
-    while (sharedSalesData->totalProduced <= 100 && sharedSalesData->rear >= -50)
+    while (sharedSalesData->totalProduced <= 100)
     {
         sem_wait(sharedSalesData->semaphore);
         if (sharedSalesData->buffer >= 0)
         {
             std::cout << "Date\t\tStore ID\tRegester #\tSales Amount\t\n";
-            std::cout << sharedSalesData->salesDataVec[sharedSalesData->buffer];
-            conSalesTemp = sharedSalesData->salesDataVec[sharedSalesData->buffer];
+            std::cout << sharedSalesData->salesDataArr[sharedSalesData->buffer];
+            conSalesTemp = sharedSalesData->salesDataArr[sharedSalesData->buffer];
             sharedSalesData->storeWideTotalSales[0] += conSalesTemp.salesAmount;
             sharedSalesData->aggregateSales += conSalesTemp.salesAmount;
             sharedSalesData->monthWideTotalSales[conSalesTemp.date.month - 1] += conSalesTemp.salesAmount;
