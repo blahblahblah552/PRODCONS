@@ -20,7 +20,7 @@ OBJS = $(SRCS:.cpp=.o)
 JUNK = *.txt pcp.conf
 
 #base command
-COMMAND = $(shell ./$(TARGET))
+COMMAND = $(shell ./$(TARGET) > outtext.txt)
 
 # Default rule to build and run the executable
 all: $(TARGET)
@@ -36,6 +36,7 @@ $(TARGET): $(OBJS)
 # Rule to run the executable
 run: $(TARGET)
 	$(COMMAND)
+	
 
 # Clean rule to remove generated files
 clean:

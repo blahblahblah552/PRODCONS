@@ -1,0 +1,12 @@
+#Problem 1: Producer-Consumer Problem
+
+This program addresses the Producer-Consumer Problem with a set of p producers and c consumers, each running as a single thread. These threads are synchronized via a shared buffer of size b (i.e., it can accommodate b items).
+
+##Instalation
+Use the following script to run the makefile where it will make all and run the program outputing on the terminal and adding files for each instance at the end it will show all the times that were placed in time.txt
+To clean directory use make clean
+This does use c++20 if error occurs during make might need to update it
+
+```bash
+./run.sh
+```

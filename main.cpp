@@ -105,8 +105,6 @@ int main(int argc, char const *argv[])
 
     if (pid0 > 0) {
         std::cout << "printed from parent process " << getpid() << "\n";
-        std::cout << "printed from parent process # of produced " << sharedSalesData->buffer << "\n";
-        std::cout << "total parent " << sharedSalesData->totalProduced << "\n";
         std::vector<std::thread> producerThreads;
         for (int i = 0; i < producers; i++)
         {
@@ -120,8 +118,8 @@ int main(int argc, char const *argv[])
     } 
     else {
         std::cout << "printed from child process " << getpid() << "\n";
-        std::cout << "total child " << sharedSalesData->totalProduced << "\n";
         std::vector<std::thread> consumerThreads;
+        std::cout << "Date\t\tStore ID\tRegester #\tSales Amount\t\n";
         for (int i = 0; i < consumers; i++)
         {
             consumerThreads.emplace_back(consumersFun,sharedSalesData);
@@ -162,7 +160,7 @@ int main(int argc, char const *argv[])
     auto endTime = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double, std::milli> durationMS = endTime - startTime;
     std::cout << "Program execution time: " << durationMS.count() << "ms\n";
-    timeFile << durationMS.count() <<"\n";
+    timeFile <<producers << "\t" << consumers << "\t" << capacity << "\t" << durationMS.count() <<"ms\n";
     timeFile.close();
     return 0;
 }
@@ -200,7 +198,6 @@ void consumersFun(statistics *sharedSalesData)
         sem_wait(sharedSalesData->semaphore);
         if (sharedSalesData->buffer >= 0)
         {
-            std::cout << "Date\t\tStore ID\tRegester #\tSales Amount\t\n";
             std::cout << sharedSalesData->salesDataArr[sharedSalesData->buffer];
             conSalesTemp = sharedSalesData->salesDataArr[sharedSalesData->buffer];
             sharedSalesData->storeWideTotalSales[conSalesTemp.storeID] += conSalesTemp.salesAmount;

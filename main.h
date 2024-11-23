@@ -20,7 +20,7 @@
 #define HI 999.99f
 #define SHARED_MEMORY_SIZE 1024
 #define TIME_LOACATION "time.txt"
-#define NUM_OF_ITEMS 100
+#define NUM_OF_ITEMS 1000
 
 struct Date
 {
