@@ -4,13 +4,13 @@
 #include <sys/shm.h>
 #include <semaphore.h>
 #include <vector>
-#include <asm-generic/fcntl.h>
 #include <iomanip>
 #include <thread>
 #include <sys/wait.h>
 #include <fstream>
 #include <string.h>
 #include <sys/mman.h>
+#include <fcntl.h>
 
 const int SEED = 5;
 const float LO = 0.5;
@@ -75,7 +75,10 @@ struct statistics
     int rear = 0;
     int totalProduced = 0;
     SalesData salesDataVec[10];
+    sem_t *semaphore;
 };
+
+void consumersClass(statistics *sharedSalesData);
 
 // input producers, consumers, and buffer size
 int main(int argc, char const *argv[])
@@ -100,13 +103,6 @@ int main(int argc, char const *argv[])
     float *arrSWTS = new float[producers];
     stat->storeWideTotalSales = arrSWTS;
 
-    // Create and initialize the semaphore
-    sem_t *semaphore;
-    if ((semaphore = sem_open("pSem", O_CREAT, 0666, 1)) == SEM_FAILED) {
-        perror("sem_open");
-        exit(EXIT_FAILURE);
-    }
-
     const char *sharedSalesDataLocation = "pcp.conf";
     const int projectID = 65;   
 
@@ -128,8 +124,6 @@ int main(int argc, char const *argv[])
      
     if (shmid == -1) {
         perror("shmget");
-        sem_close(semaphore);
-        sem_unlink("pSem");
         exit(EXIT_FAILURE);
     }
 
@@ -139,8 +133,6 @@ int main(int argc, char const *argv[])
     if (sharedSalesData == (void*)-1) {
         perror("shmat");
         shmctl(shmid, IPC_RMID, NULL);
-        sem_close(semaphore);
-        sem_unlink("pSem");
         exit(EXIT_FAILURE);
     }
 
@@ -150,19 +142,27 @@ int main(int argc, char const *argv[])
         exit(1);
     }
 
+    sem_unlink("pSem");// just in case of a crash can be cleared
+    // Create and initialize the semaphore
+
+    if ((sharedSalesData->semaphore = sem_open("pSem", O_CREAT, 0666, 1)) == SEM_FAILED) {
+        perror("sem_open");
+        exit(EXIT_FAILURE);
+    }
+
 
     sharedSalesData->buffer = -1;
     sharedSalesData->rear = 0;
     sharedSalesData->totalProduced = 0;
     
-    sem_post(semaphore);
+    sem_post(sharedSalesData->semaphore);
     pid_t pid0 = fork();
 
     if (pid0 == -1) { 
         perror("fork"); 
         shmdt(sharedSalesData);
         shmctl(shmid, IPC_RMID, NULL);
-        sem_close(semaphore);
+        sem_close(sharedSalesData->semaphore);
         sem_unlink("pSem");
         exit(EXIT_FAILURE); 
     }
@@ -177,14 +177,14 @@ int main(int argc, char const *argv[])
         {
             salesTemp = SalesData();
             salesTemp.storeID = getpid()%6;
-            sem_wait(semaphore);
+            sem_wait(sharedSalesData->semaphore);
             if (sharedSalesData->buffer < 10)
             {
                 sharedSalesData->buffer++;
                 sharedSalesData->salesDataVec[sharedSalesData->buffer] = salesTemp;
                 sharedSalesData->totalProduced++;
             }
-            sem_post(semaphore);
+            sem_post(sharedSalesData->semaphore);
             
             std::this_thread::sleep_for(std::chrono::milliseconds(rand()%35+5));
             //sharedSalesData->rear--;
@@ -195,28 +195,7 @@ int main(int argc, char const *argv[])
         std::cout << "printed from child process " << getpid() << "\n";
         std::cout << "total child " << sharedSalesData->totalProduced << "\n";
         std::cout << "rear " << sharedSalesData->rear << "\n";
-        SalesData conSalesTemp;
-        while (sharedSalesData->totalProduced <= 100 && sharedSalesData->rear >= -50)
-        {
-            sem_wait(semaphore);
-            if(sharedSalesData->buffer >= 0)
-            {
-                std::cout << "Date\t\tStore ID\tRegester #\tSales Amount\t\n";
-                std::cout << sharedSalesData->salesDataVec[sharedSalesData->buffer];
-                conSalesTemp = sharedSalesData->salesDataVec[sharedSalesData->buffer];
-                sharedSalesData->storeWideTotalSales[0] += conSalesTemp.salesAmount;
-                sharedSalesData->aggregateSales+=conSalesTemp.salesAmount;
-                sharedSalesData->monthWideTotalSales[conSalesTemp.date.month-1] += conSalesTemp.salesAmount;
-
-                std::cout << "Store-wide total sales: " << sharedSalesData->storeWideTotalSales[0] << "\n";
-                sharedSalesData->buffer--;
-            }
-            sem_post(semaphore);
-            
-            //std::this_thread::sleep_for(std::chrono::seconds(1));
-            //sharedSalesData->rear--;
-        }
-        exit(0); // child exits
+        std::thread t1(consumersClass,sharedSalesData);
     }
 
     
@@ -235,8 +214,34 @@ int main(int argc, char const *argv[])
 
     shmdt(sharedSalesData);
     shmctl(shmid, IPC_RMID, NULL);
-    sem_close(semaphore);
+    sem_close(sharedSalesData->semaphore);
+    sem_unlink("pSem");
     
     return 0;
 }
 
+void consumersClass(statistics *sharedSalesData)
+{
+    SalesData conSalesTemp;
+    while (sharedSalesData->totalProduced <= 100 && sharedSalesData->rear >= -50)
+    {
+        sem_wait(sharedSalesData->semaphore);
+        if (sharedSalesData->buffer >= 0)
+        {
+            std::cout << "Date\t\tStore ID\tRegester #\tSales Amount\t\n";
+            std::cout << sharedSalesData->salesDataVec[sharedSalesData->buffer];
+            conSalesTemp = sharedSalesData->salesDataVec[sharedSalesData->buffer];
+            sharedSalesData->storeWideTotalSales[0] += conSalesTemp.salesAmount;
+            sharedSalesData->aggregateSales += conSalesTemp.salesAmount;
+            sharedSalesData->monthWideTotalSales[conSalesTemp.date.month - 1] += conSalesTemp.salesAmount;
+
+            std::cout << "Store-wide total sales: " << sharedSalesData->storeWideTotalSales[0] << "\n";
+            sharedSalesData->buffer--;
+        }
+        sem_post(sharedSalesData->semaphore);
+
+        // std::this_thread::sleep_for(std::chrono::seconds(1));
+        // sharedSalesData->rear--;
+    }
+    exit(0); // child exits
+}
