@@ -10,7 +10,7 @@
 #include <fstream>
 #include <string.h>
 #include <sys/mman.h>
-#include <fcntl.h>
+#include <asm-generic/fcntl.h>
 
 const int SEED = 5;
 const float LO = 0.5;
@@ -144,18 +144,20 @@ int main(int argc, char const *argv[])
 
     sem_unlink("pSem");// just in case of a crash can be cleared
     // Create and initialize the semaphore
-
-    if ((sharedSalesData->semaphore = sem_open("pSem", O_CREAT, 0666, 1)) == SEM_FAILED) {
+    sem_t *sTemp;
+    if ((sTemp = sem_open("pSem", O_CREAT, 0666, 1)) == SEM_FAILED) {
         perror("sem_open");
         exit(EXIT_FAILURE);
     }
+
+    sharedSalesData->semaphore = sTemp;
 
 
     sharedSalesData->buffer = -1;
     sharedSalesData->rear = 0;
     sharedSalesData->totalProduced = 0;
-    
     sem_post(sharedSalesData->semaphore);
+    
     pid_t pid0 = fork();
 
     if (pid0 == -1) { 
