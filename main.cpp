@@ -1,81 +1,5 @@
-#include <iostream>
-#include <cstdlib>
-#include <unistd.h>
-#include <sys/shm.h>
-#include <semaphore.h>
-#include <vector>
-#include <iomanip>
-#include <thread>
-#include <sys/wait.h>
-#include <fstream>
-#include <string.h>
-#include <sys/mman.h>
-#include <asm-generic/fcntl.h>
 
-const int SEED = 5;
-const float LO = 0.5;
-const float HI = 999.99;
-
-struct Date
-{
-    int year = 2016;
-    int day = std::rand()%30 + 1; // 1-30
-    int month = std::rand()%12 + 1; // 1 -12
-
-    Date& operator=(const Date& r){
-        year = r.year;
-        day = r.day;
-        month = r.month;
-        return *this;
-    }
-
-};
-
-std::ostream& operator<<(std::ostream& os, const Date& d) {
-    os << d.day << "/" << d.month << "/" << d.year;
-    return os;
-};
-
-struct SalesData
-{
-    //sales date date
-    Date date;
-
-    //store ID int
-    //storeID = producersID
-    int storeID = -1; 
-
-    //register# int
-    int regesterNum = std::rand()%6 + 1;
-
-    //sales amount float .. really should be an int when dealing with money
-    float salesAmount = LO + static_cast <float> (rand()) /( static_cast <float> (RAND_MAX/(HI-LO)));
-
-    SalesData &operator=(SalesData const& r){
-        date = r.date;
-        regesterNum = r.regesterNum;
-        salesAmount = r.salesAmount;
-        storeID = r.storeID;
-        return *this;
-    }
-};
-
-std::ostream& operator<<(std::ostream& os, const SalesData& sd) {
-    os << sd.date << "\t" << sd.storeID << "\t\t" << sd.regesterNum << "\t\t" << std::fixed << std::setprecision(2) << sd.salesAmount << "\n";
-    return os;
-};
-
-struct statistics
-{
-    float *storeWideTotalSales; // p size
-    float monthWideTotalSales[12];
-    float aggregateSales = 0; //all sales together
-    time_t totalTime;
-    int buffer = 0;
-    int totalProduced = 0;
-    SalesData *salesDataArr;
-    sem_t *semaphore;
-};
+#include "main.h"
 
 void consumersFun(statistics *sharedSalesData);
 
@@ -84,31 +8,27 @@ void ProducersFun(statistics *sharedSalesData);
 // input producers, consumers, and buffer size
 int main(int argc, char const *argv[])
 {
-    time_t startTime, endTime;
+    time_t startTime;
 
     std::srand(SEED);
 
-    long unsigned int producers = 1;
-    long unsigned int consumers = 1;
-    long unsigned int salesDataBufferSize = sizeof(statistics)*10;
+    long unsigned int producers = 2;
+    long unsigned int consumers = 2;
+    long unsigned int capacity = 3;
+    long unsigned int memorySize = sizeof(statistics)*9;
 
     if (argc > 3)
     {
-        producers = atoi(argv[0]);
-        consumers = atoi(argv[1]);
-        salesDataBufferSize = sizeof(statistics) + sizeof(SalesData) * atoi(argv[2])+ sizeof(float)*producers;
+        producers = atoi(argv[1]);
+        consumers = atoi(argv[2]);
+        capacity  = atoi(argv[3]);
     }
 
-    const char *sharedSalesDataLocation = "pcp.conf";
-    const int projectID = 65;   
-
-
-    std::ofstream outfile(sharedSalesDataLocation);
+    std::ofstream outfile(SALES_LOCATION);
     outfile.close();
 
     // ftok to generate unique key
-    key_t key = ftok(sharedSalesDataLocation, projectID);
-
+    key_t key = ftok(SALES_LOCATION, PROJECT_ID);
     if (key == -1)
     {
         perror("ftok");
@@ -116,7 +36,7 @@ int main(int argc, char const *argv[])
     }
     
     // shmget returns an identifier in shmid
-     int shmid = shmget(key, salesDataBufferSize, 0666 | IPC_CREAT);
+     int shmid = shmget(key, SHARED_MEMORY_SIZE, 0666 | IPC_CREAT);
      
     if (shmid == -1) {
         perror("shmget");
@@ -137,6 +57,15 @@ int main(int argc, char const *argv[])
         perror("mmap");
         exit(1);
     }
+    for (int i = 0; i < producers; i++)
+    {
+        sharedSalesData->monthWideTotalSales[i] = (float *)mmap(NULL, sizeof(float) * producers, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+        if (sharedSalesData->monthWideTotalSales[i] == MAP_FAILED) {
+            perror("mmap");
+            exit(1);
+        }
+    }
+    
 
     sharedSalesData->salesDataArr = (SalesData *)mmap(NULL, sizeof(SalesData) * producers, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
     if (sharedSalesData->salesDataArr == MAP_FAILED) {
@@ -152,14 +81,15 @@ int main(int argc, char const *argv[])
         exit(1);
     }
         // Create and initialize the semaphore
-        if ((sharedSalesData->semaphore = sem_open("pSem", O_CREAT | O_RDWR | O_EXCL, 0666, 1)) == SEM_FAILED) {
+        if ((sharedSalesData->semaphore = sem_open(SNAME, O_CREAT | O_RDWR | O_EXCL, 0666, 1)) == SEM_FAILED) {
             perror("sem_open");
             exit(EXIT_FAILURE);
         }
 
     sharedSalesData->buffer = -1;
     sharedSalesData->totalProduced = 0;
-    sem_post(sharedSalesData->semaphore);
+    sharedSalesData->capacity = capacity;
+    //sem_post(sharedSalesData->semaphore);
     
     pid_t pid0 = fork();
 
@@ -204,19 +134,17 @@ int main(int argc, char const *argv[])
         exit(0);//child exits
     }
 
-    
     wait(NULL);
     for (int i = 0; i < 12; i++)
     {
-        std::cout << "Month " << i+1 << " total sales ";
-        for (int j = 0; j < 1/*size p*/; j++)
+        std::cout << "Month " << i+1 << " total sales \n";
+        for (int j = 0; j < producers; j++)
         {
-            std::cout << "for store " << j << " " << sharedSalesData->monthWideTotalSales[i] << "\n";
+            std::cout << "for store " << j+1 << " " << sharedSalesData->monthWideTotalSales[j][i] << "\n";
         }
     }
     
     std::cout << "Aggregate sales " << sharedSalesData->aggregateSales << "\n";
-
 
     sem_close(sharedSalesData->semaphore);
     sem_unlink("pSem");
@@ -229,12 +157,16 @@ int main(int argc, char const *argv[])
     void ProducersFun(statistics *sharedSalesData)
 {
     SalesData salesTemp;
+    sem_wait(sharedSalesData->semaphore);
+    int tempID = sharedSalesData->tempID;
+    sharedSalesData->tempID++;
+    sem_post(sharedSalesData->semaphore);
     while (sharedSalesData->totalProduced <= 100)
     {
         salesTemp = SalesData();
-        salesTemp.storeID = getpid() % 6;
+        salesTemp.storeID = tempID;
         sem_wait(sharedSalesData->semaphore);
-        if (sharedSalesData->buffer < 10)
+        if (sharedSalesData->buffer < sharedSalesData->capacity)
         {
             sharedSalesData->buffer++;
             sharedSalesData->salesDataArr[sharedSalesData->buffer] = salesTemp;
@@ -257,17 +189,14 @@ void consumersFun(statistics *sharedSalesData)
             std::cout << "Date\t\tStore ID\tRegester #\tSales Amount\t\n";
             std::cout << sharedSalesData->salesDataArr[sharedSalesData->buffer];
             conSalesTemp = sharedSalesData->salesDataArr[sharedSalesData->buffer];
-            sharedSalesData->storeWideTotalSales[0] += conSalesTemp.salesAmount;
+            sharedSalesData->storeWideTotalSales[conSalesTemp.storeID] += conSalesTemp.salesAmount;
             sharedSalesData->aggregateSales += conSalesTemp.salesAmount;
-            sharedSalesData->monthWideTotalSales[conSalesTemp.date.month - 1] += conSalesTemp.salesAmount;
+            sharedSalesData->monthWideTotalSales[conSalesTemp.storeID][conSalesTemp.date.month - 1] += conSalesTemp.salesAmount;
 
-            std::cout << "Store-wide total sales: " << sharedSalesData->storeWideTotalSales[0] << "\n";
+            std::cout << "Store-wide total sales: " << sharedSalesData->storeWideTotalSales[sharedSalesData->salesDataArr[sharedSalesData->buffer].storeID] << "\n";
             sharedSalesData->buffer--;
         }
         sem_post(sharedSalesData->semaphore);
-
-        // std::this_thread::sleep_for(std::chrono::seconds(1));
-        // sharedSalesData->rear--;
     }
     exit(0); // child exits
 }
