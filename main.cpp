@@ -5,17 +5,18 @@ void consumersFun(statistics *sharedSalesData);
 
 void ProducersFun(statistics *sharedSalesData);
 
+std::mutex mut;
+
 // input producers, consumers, and buffer size
 int main(int argc, char const *argv[])
 {
-    time_t startTime;
+    auto startTime = std::chrono::high_resolution_clock::now();
 
     std::srand(SEED);
 
-    long unsigned int producers = 2;
-    long unsigned int consumers = 2;
-    long unsigned int capacity = 3;
-    long unsigned int memorySize = sizeof(statistics)*9;
+    int producers = 2;
+    int consumers = 2;
+    int capacity = 3;
 
     if (argc > 3)
     {
@@ -135,6 +136,11 @@ int main(int argc, char const *argv[])
     }
 
     wait(NULL);
+    for (int i = 0; i < producers; i++)
+    {
+        std::cout << "Store " << i+1 <<" total sales: " << sharedSalesData->storeWideTotalSales[i] << "\n";
+    }
+    
     for (int i = 0; i < 12; i++)
     {
         std::cout << "Month " << i+1 << " total sales \n";
@@ -151,25 +157,32 @@ int main(int argc, char const *argv[])
     shmdt(sharedSalesData);
     shmctl(shmid, IPC_RMID, NULL);
     
+    //save time
+    std::ofstream timeFile(TIME_LOACATION, std::ios::app);
+    auto endTime = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double, std::milli> durationMS = endTime - startTime;
+    std::cout << "Program execution time: " << durationMS.count() << "ms\n";
+    timeFile << durationMS.count() <<"\n";
+    timeFile.close();
     return 0;
 }
 
     void ProducersFun(statistics *sharedSalesData)
 {
-    SalesData salesTemp;
+    SalesData tempProSales;
     sem_wait(sharedSalesData->semaphore);
     int tempID = sharedSalesData->tempID;
     sharedSalesData->tempID++;
     sem_post(sharedSalesData->semaphore);
-    while (sharedSalesData->totalProduced <= 100)
+    while (sharedSalesData->totalProduced <= NUM_OF_ITEMS)
     {
-        salesTemp = SalesData();
-        salesTemp.storeID = tempID;
+        tempProSales = SalesData();
+        tempProSales.storeID = tempID;
         sem_wait(sharedSalesData->semaphore);
         if (sharedSalesData->buffer < sharedSalesData->capacity)
         {
             sharedSalesData->buffer++;
-            sharedSalesData->salesDataArr[sharedSalesData->buffer] = salesTemp;
+            sharedSalesData->salesDataArr[sharedSalesData->buffer] = tempProSales;
             sharedSalesData->totalProduced++;
         }
         sem_post(sharedSalesData->semaphore);
@@ -181,7 +194,8 @@ int main(int argc, char const *argv[])
 void consumersFun(statistics *sharedSalesData)
 {
     SalesData conSalesTemp;
-    while (sharedSalesData->totalProduced <= 100)
+    float localStat = 0.0f;
+    while (sharedSalesData->totalProduced <= NUM_OF_ITEMS)
     {
         sem_wait(sharedSalesData->semaphore);
         if (sharedSalesData->buffer >= 0)
@@ -190,13 +204,20 @@ void consumersFun(statistics *sharedSalesData)
             std::cout << sharedSalesData->salesDataArr[sharedSalesData->buffer];
             conSalesTemp = sharedSalesData->salesDataArr[sharedSalesData->buffer];
             sharedSalesData->storeWideTotalSales[conSalesTemp.storeID] += conSalesTemp.salesAmount;
+            localStat= conSalesTemp.salesAmount;
             sharedSalesData->aggregateSales += conSalesTemp.salesAmount;
             sharedSalesData->monthWideTotalSales[conSalesTemp.storeID][conSalesTemp.date.month - 1] += conSalesTemp.salesAmount;
-
-            std::cout << "Store-wide total sales: " << sharedSalesData->storeWideTotalSales[sharedSalesData->salesDataArr[sharedSalesData->buffer].storeID] << "\n";
             sharedSalesData->buffer--;
         }
         sem_post(sharedSalesData->semaphore);
     }
-    exit(0); // child exits
+    try
+    {
+        std::lock_guard<std::mutex> lock(mut);
+        std::cout<< "Local statistics " << localStat << " ID: " << std::this_thread::get_id() << "\n";
+    }
+    catch(const std::exception& e)
+    {
+        std::cerr << e.what() << '\n';
+    }
 }

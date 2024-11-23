@@ -121,5 +121,13 @@
     "fstream": "cpp",
     "__mutex_base": "cpp",
     "filesystem": "cpp"
-  }
+  },
+  "makefile.makefilePath": "/home/marks/CS471PROJECT/PRODCONS/makefile",
+  "makefile.launchConfigurations": [
+    {
+      "cwd": "/home/marks/CS471PROJECT/PRODCONS",
+      "binaryPath": "/home/marks/CS471PROJECT/PRODCONS/Producer-Consumer",
+      "binaryArgs": []
+    }
+  ]
 }

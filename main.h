@@ -19,7 +19,8 @@
 #define LO 0.5f
 #define HI 999.99f
 #define SHARED_MEMORY_SIZE 1024
-
+#define TIME_LOACATION "time.txt"
+#define NUM_OF_ITEMS 100
 
 struct Date
 {
@@ -65,7 +66,7 @@ struct SalesData
 };
 
 std::ostream& operator<<(std::ostream& os, const SalesData& sd) {
-    os << sd.date << "\t" << sd.storeID << "\t\t" << sd.regesterNum << "\t\t" << std::fixed << std::setprecision(2) << sd.salesAmount << "\n";
+    os << sd.date << "\t" << sd.storeID+1 << "\t\t" << sd.regesterNum << "\t\t" << std::fixed << std::setprecision(2) << sd.salesAmount << "\n";
     return os;
 };
 

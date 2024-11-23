@@ -1,0 +1,2 @@
+/home/marks/CS471PROJECT/PRODCONS/build/CMakeFiles/edit_cache.dir
+/home/marks/CS471PROJECT/PRODCONS/build/CMakeFiles/rebuild_cache.dir
