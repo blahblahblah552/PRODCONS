@@ -2,7 +2,7 @@
 CXX = g++
 
 # Compiler flags
-CXXFLAGS = -Wall -g -lpthread -std=c++20
+CXXFLAGS = -lpthread -std=c++20
 
 # Target executable
 TARGET = producer-Consumer

@@ -4,9 +4,18 @@ This program addresses the Producer-Consumer Problem with a set of p producers a
 
 ##Instalation
 Use the following script to run the makefile where it will make all and run the program outputing on the terminal and adding files for each instance at the end it will show all the times that were placed in time.txt
-To clean directory use make clean
+To clean directory use 
+```bash
+make clean
+```
 This does use c++20 if error occurs during make might need to update it
 
 ```bash
 ./run.sh
 ```
+You may also directly exicute the programe arguements are # of producers, # of consumers, buffer size
+If no arguments or more than 3 it will default to 2 2 3
+```bash
+producer-Consumer p c b
+```
+
