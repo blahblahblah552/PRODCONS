@@ -79,6 +79,7 @@ struct statistics
     int buffer = 0;
     int tempID = 1;
     int totalProduced = 0;
+    int totalConsumed = 0;
     SalesData *salesDataArr;
     sem_t *semaphore;
     int capacity = 0;

@@ -120,7 +120,9 @@
     "codecvt": "cpp",
     "fstream": "cpp",
     "__mutex_base": "cpp",
-    "filesystem": "cpp"
+    "filesystem": "cpp",
+    "__locale": "cpp",
+    "__string": "cpp"
   },
   "makefile.makefilePath": "/home/marks/CS471PROJECT/PRODCONS/makefile",
   "makefile.launchConfigurations": [

@@ -58,6 +58,7 @@ int main(int argc, char const *argv[])
         perror("mmap");
         exit(1);
     }
+
     for (int i = 0; i < producers; i++)
     {
         sharedSalesData->monthWideTotalSales[i] = (float *)mmap(NULL, sizeof(float) * producers, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
@@ -81,6 +82,8 @@ int main(int argc, char const *argv[])
         perror("mmap");
         exit(1);
     }
+
+
         // Create and initialize the semaphore
         if ((sharedSalesData->semaphore = sem_open(SNAME, O_CREAT | O_RDWR | O_EXCL, 0666, 1)) == SEM_FAILED) {
             perror("sem_open");
@@ -150,8 +153,37 @@ int main(int argc, char const *argv[])
     
     std::cout << "Aggregate sales " << sharedSalesData->aggregateSales << "\n";
 
+
+    /////////////////////////////////////////////////////////////////clean up////////////////////////////////////////////////////////
     sem_close(sharedSalesData->semaphore);
     sem_unlink("pSem");
+
+    ////clean semaphore
+    if(munmap(sharedSalesData->semaphore, sizeof(sem_t)) == -1) {
+        perror("munmap");
+        exit(1);
+    }
+
+    //clean sales
+    if(munmap(sharedSalesData->salesDataArr, sizeof(SalesData) * producers) == -1) {
+        perror("munmap");
+        exit(1);
+    }
+
+    //clean months
+    for (int i = 0; i < producers; i++)
+    {
+        if(munmap(sharedSalesData->monthWideTotalSales[i], sizeof(float) * producers) == -1) {
+        perror("munmap");
+        exit(1);
+        }
+    }
+
+    if(munmap(sharedSalesData->storeWideTotalSales, sizeof(float) * producers) == -1) {
+        perror("munmap");
+        exit(1);
+        }
+
     shmdt(sharedSalesData);
     shmctl(shmid, IPC_RMID, NULL);
     
@@ -193,7 +225,7 @@ void consumersFun(statistics *sharedSalesData)
 {
     SalesData conSalesTemp;
     float localStat = 0.0f;
-    while (sharedSalesData->totalProduced <= NUM_OF_ITEMS)
+    while (sharedSalesData->totalConsumed <= NUM_OF_ITEMS)
     {
         sem_wait(sharedSalesData->semaphore);
         if (sharedSalesData->buffer >= 0)
@@ -205,6 +237,7 @@ void consumersFun(statistics *sharedSalesData)
             sharedSalesData->aggregateSales += conSalesTemp.salesAmount;
             sharedSalesData->monthWideTotalSales[conSalesTemp.storeID][conSalesTemp.date.month - 1] += conSalesTemp.salesAmount;
             sharedSalesData->buffer--;
+            sharedSalesData->totalConsumed++;
         }
         sem_post(sharedSalesData->semaphore);
     }
